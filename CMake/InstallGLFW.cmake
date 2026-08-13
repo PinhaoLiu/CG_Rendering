@@ -21,13 +21,14 @@ if (NOT glfw3_FOUND)
 	message (STATUS "Setting up CMake for glfw…")
 	execute_process (
 		COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
-		                         -A "${CMAKE_GENERATOR_PLATFORM}"
-		                         -DGLFW_BUILD_DOCS=OFF
-		                         -DGLFW_BUILD_TESTS=OFF
-		                         -DGLFW_BUILD_EXAMPLES=OFF
-		                         -DCMAKE_INSTALL_PREFIX=${glfw_INSTALL_DIR}
-		                         -DCMAKE_BUILD_TYPE=Release
-		                         ${glfw_SOURCE_DIR}
+								 -A "${CMAKE_GENERATOR_PLATFORM}"
+								 -DGLFW_BUILD_DOCS=OFF
+								 -DGLFW_BUILD_TESTS=OFF
+								 -DGLFW_BUILD_EXAMPLES=OFF
+								 -DCMAKE_INSTALL_PREFIX=${glfw_INSTALL_DIR}
+								 -DCMAKE_BUILD_TYPE=Release
+								 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+								 ${glfw_SOURCE_DIR}
 		OUTPUT_VARIABLE stdout
 		ERROR_VARIABLE stderr
 		RESULT_VARIABLE result

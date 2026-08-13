@@ -29,6 +29,7 @@ if (NOT glm_FOUND)
 		                         -A "${CMAKE_GENERATOR_PLATFORM}"
 		                         -DCMAKE_INSTALL_PREFIX=${glm_INSTALL_DIR}
 		                         -DCMAKE_BUILD_TYPE=Release
+								 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 					 -DGLM_TEST_ENABLE=OFF
 		                         ${glm_SOURCE_DIR}
 		OUTPUT_VARIABLE stdout
