@@ -28,12 +28,25 @@ namespace interpolation
 	//! @param [in] t tension
 	//! @param [in] x distance ratio between p1 and p2 at which the
 	//!               interpolated point should be:
-	//!               * x == 0.0: result will be p0;
-	//!               * x == 1.0: result will be p1;
-	//!               * x == 0.5: result will be the midpoint of [p0,p1]
-	//!               * x ∈ ]0,1[: result will be somewhere on ]p0,p1[
+	//!               * x == 0.0: result will be p1;
+	//!               * x == 1.0: result will be p2;
+	//!               * x ∈ ]0,1[: result will be on the spline segment
+	//!                              between p1 and p2
 	//! @return interpolated position
 	glm::vec3 evalCatmullRom(glm::vec3 const&p0, glm::vec3 const&p1,
 	                         glm::vec3 const&p2, glm::vec3 const&p3,
 	                         float const t, float const x);
+
+	//! \brief Evaluate the tangent of a Catmull-Rom spline segment.
+	//!
+	//! @param [in] p0 \f$p[i-1]\f$
+	//! @param [in] p1 \f$p[i]\f$
+	//! @param [in] p2 \f$p[i+1]\f$
+	//! @param [in] p3 \f$p[i+2]\f$
+	//! @param [in] t tension
+	//! @param [in] x position on the segment between p1 and p2
+	//! @return derivative of the spline position with respect to x
+	glm::vec3 evalCatmullRomDerivative(glm::vec3 const&p0, glm::vec3 const&p1,
+	                                   glm::vec3 const&p2, glm::vec3 const&p3,
+	                                   float const t, float const x);
 }

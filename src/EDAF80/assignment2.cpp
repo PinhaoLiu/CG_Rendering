@@ -15,6 +15,7 @@
 
 #include <array>
 #include <clocale>
+#include <cmath>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -42,8 +43,8 @@ edaf80::Assignment2::~Assignment2()
 void
 edaf80::Assignment2::run()
 {
-	// Load the sphere geometry
-	auto const shape = parametric_shapes::createCircleRing(2.0f, 0.75f, 40u, 4u);
+	// The torus lies around its local Y axis; that axis will follow the path.
+	auto const shape = parametric_shapes::createTorus(0.35f, 0.12f, 40u, 12u);
 	if (shape.vao == 0u)
 		return;
 
@@ -111,11 +112,14 @@ edaf80::Assignment2::run()
 
 	// Set the default tensions value; it can always be changed at runtime
 	// through the "Scene Controls" window.
-	float catmull_rom_tension = 0.0f;
+	float catmull_rom_tension = 0.5f;
 
 	// Set whether the default interpolation algorithm should be the linear one;
 	// it can always be changed at runtime through the "Scene Controls" window.
-	bool use_linear = true;
+	// Catmull-Rom keeps the tangent continuous across the closed-loop seam.
+	// Linear interpolation remains available in the GUI for comparison, but
+	// necessarily turns abruptly at every control point.
+	bool use_linear = false;
 
 	// Set whether to interpolate the position of an object or not; it can
 	// always be changed at runtime through the "Scene Controls" window.
@@ -125,13 +129,9 @@ edaf80::Assignment2::run()
 	// at runtime through the "Scene Controls" window.
 	bool show_control_points = true;
 
-	auto circle_rings = Node();
-	circle_rings.set_geometry(shape);
-	circle_rings.set_program(&fallback_shader, set_uniforms);
-	TRSTransformf& circle_rings_transform_ref = circle_rings.get_transform();
-
-
-	//! \todo Create a tesselated sphere and a tesselated torus
+	auto animated_object = Node();
+	animated_object.set_geometry(shape);
+	animated_object.set_program(&fallback_shader, set_uniforms);
 
 
 	glClearDepthf(1.0f);
@@ -158,6 +158,7 @@ edaf80::Assignment2::run()
 		control_point.set_program(&diffuse_shader, set_uniforms);
 		control_point.get_transform().SetTranslate(control_point_locations[i]);
 	}
+	animated_object.get_transform().SetTranslate(control_point_locations.front());
 
 
 	auto lastTime = std::chrono::high_resolution_clock::now();
@@ -214,21 +215,65 @@ edaf80::Assignment2::run()
 
 
 		if (interpolate) {
-			//! \todo Interpolate the movement of a shape between various
-			//!        control points.
+			auto const control_point_count = control_point_locations.size();
+			auto const path_position = std::fmod(
+				elapsed_time_s, static_cast<float>(control_point_count));
+			auto const segment_index = static_cast<std::size_t>(path_position);
+			auto const x = path_position - static_cast<float>(segment_index);
+			auto const next_index = (segment_index + 1u) % control_point_count;
+
+			glm::vec3 interpolated_position;
+			glm::vec3 movement_direction;
 			if (use_linear) {
-				//! \todo Compute the interpolated position
-				//!       using the linear interpolation.
+				interpolated_position = interpolation::evalLERP(
+					control_point_locations[segment_index],
+					control_point_locations[next_index], x);
+				movement_direction = control_point_locations[next_index]
+				                   - control_point_locations[segment_index];
 			}
 			else {
-				//! \todo Compute the interpolated position
-				//!       using the Catmull-Rom interpolation;
-				//!       use the `catmull_rom_tension`
-				//!       variable as your tension argument.
+				auto const previous_index =
+					(segment_index + control_point_count - 1u) % control_point_count;
+				auto const following_index = (segment_index + 2u) % control_point_count;
+				interpolated_position = interpolation::evalCatmullRom(
+					control_point_locations[previous_index],
+					control_point_locations[segment_index],
+					control_point_locations[next_index],
+					control_point_locations[following_index],
+					catmull_rom_tension, x);
+				movement_direction = interpolation::evalCatmullRomDerivative(
+					control_point_locations[previous_index],
+					control_point_locations[segment_index],
+					control_point_locations[next_index],
+					control_point_locations[following_index],
+					catmull_rom_tension, x);
+			}
+
+			auto& animated_transform = animated_object.get_transform();
+			animated_transform.SetTranslate(interpolated_position);
+
+			if (glm::dot(movement_direction, movement_direction) > 0.000001f) {
+				auto const forward = glm::normalize(movement_direction);
+
+				// Preserve the previous perpendicular axis to avoid unnecessary
+				// rolling while transporting the torus frame along the curve.
+				auto torus_front = animated_transform.GetFront();
+				torus_front -= glm::dot(torus_front, forward) * forward;
+				if (glm::dot(torus_front, torus_front) <= 0.000001f) {
+					auto reference_axis = glm::vec3(0.0f, 1.0f, 0.0f);
+					if (std::abs(glm::dot(forward, reference_axis)) > 0.999f)
+						reference_axis = glm::vec3(1.0f, 0.0f, 0.0f);
+					torus_front = glm::cross(forward, reference_axis);
+				}
+				torus_front = glm::normalize(torus_front);
+
+				// LookTowards aligns local -Z with torus_front and local +Y with
+				// forward. The torus hole axis therefore follows the path tangent.
+				animated_transform.LookTowards(torus_front, forward);
 			}
 		}
 
-		circle_rings.render(mCamera.GetWorldToClipMatrix());
+		animated_object.render(mCamera.GetWorldToClipMatrix());
 		if (show_control_points) {
 			for (auto const& control_point : control_points) {
 				control_point.render(mCamera.GetWorldToClipMatrix());
@@ -244,7 +289,7 @@ edaf80::Assignment2::run()
 			bonobo::uiSelectPolygonMode("Polygon mode", polygon_mode);
 			auto selection_result = program_manager.SelectProgram("Shader", program_index);
 			if (selection_result.was_selection_changed) {
-				circle_rings.set_program(selection_result.program, set_uniforms);
+				animated_object.set_program(selection_result.program, set_uniforms);
 			}
 			ImGui::Separator();
 			ImGui::Checkbox("Show control points", &show_control_points);

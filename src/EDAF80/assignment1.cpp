@@ -9,8 +9,49 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cmath>
 #include <clocale>
 #include <cstdlib>
+#include <stack>
+#include <vector>
+
+
+namespace
+{
+	bonobo::mesh_data create_orbit_circle(unsigned int const segment_count)
+	{
+		std::vector<glm::vec3> vertices;
+		vertices.reserve(segment_count);
+		for (unsigned int segment = 0u; segment < segment_count; ++segment)
+		{
+			auto const angle = glm::two_pi<float>() *
+			                   static_cast<float>(segment) / static_cast<float>(segment_count);
+			vertices.emplace_back(std::cos(angle), 0.0f, std::sin(angle));
+		}
+
+		bonobo::mesh_data orbit_circle;
+		orbit_circle.vertices_nb = static_cast<GLsizei>(vertices.size());
+		orbit_circle.drawing_mode = GL_LINE_LOOP;
+		orbit_circle.name = "Orbit circle";
+
+		glGenVertexArrays(1, &orbit_circle.vao);
+		glBindVertexArray(orbit_circle.vao);
+
+		glGenBuffers(1, &orbit_circle.bo);
+		glBindBuffer(GL_ARRAY_BUFFER, orbit_circle.bo);
+		glBufferData(GL_ARRAY_BUFFER,
+		             static_cast<GLsizeiptr>(vertices.size() * sizeof(glm::vec3)),
+		             vertices.data(), GL_STATIC_DRAW);
+		glEnableVertexAttribArray(static_cast<unsigned int>(bonobo::shader_bindings::vertices));
+		glVertexAttribPointer(static_cast<unsigned int>(bonobo::shader_bindings::vertices),
+		                      3, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+		glBindBuffer(GL_ARRAY_BUFFER, 0u);
+		glBindVertexArray(0u);
+		return orbit_circle;
+	}
+}
 
 
 int main()
@@ -31,7 +72,7 @@ int main()
 	FPSCameraf camera(0.5f * glm::half_pi<float>(),
 	                  static_cast<float>(config::resolution_x) / static_cast<float>(config::resolution_y),
 	                  0.01f, 1000.0f);
-	camera.mWorld.SetTranslate(glm::vec3(0.0f, 0.0f, 6.0f));
+	camera.mWorld.SetTranslate(glm::vec3(0.0f, 4.0f, 20.0f));
 	camera.mWorld.LookAt(glm::vec3(0.0f));
 	camera.mMouseSensitivity = glm::vec2(0.003f);
 	camera.mMovementSpeed = glm::vec3(3.0f); // 3 m/s => 10.8 km/h
@@ -63,6 +104,7 @@ int main()
 	}
 	bonobo::mesh_data const& sphere = objects.front();
 	auto const saturn_ring_shape = parametric_shapes::createCircleRing(0.675f, 0.45f, 80u, 8u);
+	auto const orbit_circle_shape = create_orbit_circle(192u);
 
 
 	//
@@ -93,6 +135,18 @@ int main()
 
 		return EXIT_FAILURE;
 	}
+	GLuint orbit_shader = 0u;
+	program_manager.CreateAndRegisterProgram("Orbit",
+	                                         { { ShaderType::vertex, "EDAF80/orbit.vert" },
+	                                           { ShaderType::fragment, "EDAF80/orbit.frag" } },
+	                                         orbit_shader);
+	if (orbit_shader == 0u) {
+		LogError("Failed to generate the “Orbit” shader program: exiting.");
+
+		bonobo::deinit();
+
+		return EXIT_FAILURE;
+	}
 
 
 	//
@@ -114,7 +168,7 @@ int main()
 	OrbitConfiguration const earth_orbit{ 4.0f, glm::radians(-7.2f), glm::two_pi<float>() / 20.0f };
 
 	glm::vec3 const moon_scale{ 0.01f };
-	SpinConfiguration const moon_spin{ glm::radians(-6.7f), glm::two_pi<float>() / 90.0f };
+	SpinConfiguration const moon_spin{ glm::radians(-6.7f), glm::two_pi<float>() / 90.0f, true };
 	OrbitConfiguration const moon_orbit{ 0.2f, glm::radians(29.0f), glm::two_pi<float>() / 1.3f };
 
 	glm::vec3 const mars_scale{ 0.03f };
@@ -158,15 +212,94 @@ int main()
 	//
 	// Set up the celestial bodies.
 	//
-	CelestialBody moon(sphere, &celestial_body_shader, moon_texture);
-	moon.set_scale(glm::vec3(0.3f));
-	moon.set_spin(moon_spin);
-	moon.set_orbit({1.5f, glm::radians(-66.0f), glm::two_pi<float>() / 1.3f});
+	CelestialBody sun(sphere, &celestial_body_shader, sun_texture);
+	sun.set_scale(sun_scale);
+	sun.set_spin(sun_spin);
+
+	CelestialBody mercury(sphere, &celestial_body_shader, mercury_texture);
+	mercury.set_scale(mercury_scale);
+	mercury.set_spin(mercury_spin);
+	mercury.set_orbit(mercury_orbit);
+
+	CelestialBody venus(sphere, &celestial_body_shader, venus_texture);
+	venus.set_scale(venus_scale);
+	venus.set_spin(venus_spin);
+	venus.set_orbit(venus_orbit);
 
 	CelestialBody earth(sphere, &celestial_body_shader, earth_texture);
+	earth.set_scale(earth_scale);
 	earth.set_spin(earth_spin);
-	earth.set_orbit({-2.5f, glm::radians(45.0f), glm::two_pi<float>() / 10.0f});
+	earth.set_orbit(earth_orbit);
+
+	CelestialBody moon(sphere, &celestial_body_shader, moon_texture);
+	moon.set_scale(moon_scale);
+	moon.set_spin(moon_spin);
+	moon.set_orbit(moon_orbit);
+
+	CelestialBody mars(sphere, &celestial_body_shader, mars_texture);
+	mars.set_scale(mars_scale);
+	mars.set_spin(mars_spin);
+	mars.set_orbit(mars_orbit);
+
+	CelestialBody jupiter(sphere, &celestial_body_shader, jupiter_texture);
+	jupiter.set_scale(jupiter_scale);
+	jupiter.set_spin(jupiter_spin);
+	jupiter.set_orbit(jupiter_orbit);
+
+	CelestialBody saturn(sphere, &celestial_body_shader, saturn_texture);
+	saturn.set_scale(saturn_scale);
+	saturn.set_spin(saturn_spin);
+	saturn.set_orbit(saturn_orbit);
+	saturn.set_ring(saturn_ring_shape, &celestial_ring_shader,
+	                saturn_ring_texture, saturn_ring_scale);
+
+	CelestialBody uranus(sphere, &celestial_body_shader, uranus_texture);
+	uranus.set_scale(uranus_scale);
+	uranus.set_spin(uranus_spin);
+	uranus.set_orbit(uranus_orbit);
+
+	CelestialBody neptune(sphere, &celestial_body_shader, neptune_texture);
+	neptune.set_scale(neptune_scale);
+	neptune.set_spin(neptune_spin);
+	neptune.set_orbit(neptune_orbit);
+
 	earth.add_child(&moon);
+	sun.add_child(&mercury);
+	sun.add_child(&venus);
+	sun.add_child(&earth);
+	sun.add_child(&mars);
+	sun.add_child(&jupiter);
+	sun.add_child(&saturn);
+	sun.add_child(&uranus);
+	sun.add_child(&neptune);
+
+	Node orbit_node;
+	orbit_node.set_geometry(orbit_circle_shape);
+	orbit_node.set_program(&orbit_shader);
+
+	char const* const tour_target_names[] = {
+		"Sun", "Mercury", "Venus", "Earth", "Moon",
+		"Mars", "Jupiter", "Saturn", "Uranus", "Neptune"
+	};
+	CelestialBody* const tour_targets[] = {
+		&sun, &mercury, &venus, &earth, &moon,
+		&mars, &jupiter, &saturn, &uranus, &neptune
+	};
+	OrbitConfiguration const* const target_orbits[] = {
+		nullptr, &mercury_orbit, &venus_orbit, &earth_orbit, &moon_orbit,
+		&mars_orbit, &jupiter_orbit, &saturn_orbit, &uranus_orbit, &neptune_orbit
+	};
+	float tour_camera_distances[] = {
+		3.0f, 0.12f, 0.2f, 0.2f, 0.06f,
+		0.15f, 1.2f, 2.5f, 0.6f, 0.6f
+	};
+	float const tour_min_camera_distances[] = {
+		1.1f, 0.03f, 0.06f, 0.06f, 0.015f,
+		0.04f, 0.55f, 0.9f, 0.25f, 0.25f
+	};
+	constexpr int tour_target_count = static_cast<int>(sizeof(tour_targets) / sizeof(tour_targets[0]));
+	glm::mat4 tour_target_transforms[tour_target_count];
+	bool tour_target_transform_valid[tour_target_count]{};
 
 
 	//
@@ -184,6 +317,12 @@ int main()
 	bool show_logs = true;
 	bool show_gui = true;
 	bool show_basis = false;
+	bool show_orbits = false;
+	bool tour_enabled = false;
+	int tour_target_index = 3;
+	float tour_yaw = 0.0f;
+	float tour_pitch = std::atan(0.35f);
+	glm::vec2 tour_last_mouse_position = input_handler.GetMousePosition();
 	float time_scale = 1.0f;
 
 	while (!glfwWindowShouldClose(window)) {
@@ -204,7 +343,49 @@ int main()
 		ImGuiIO const& io = ImGui::GetIO();
 		input_handler.SetUICapture(io.WantCaptureMouse, io.WantCaptureKeyboard);
 		input_handler.Advance();
-		camera.Update(delta_time_us, input_handler);
+
+		auto const tour_mouse_position = input_handler.GetMousePosition();
+		auto const tour_mouse_delta = tour_mouse_position - tour_last_mouse_position;
+		tour_last_mouse_position = tour_mouse_position;
+
+		camera.Update(delta_time_us, input_handler, tour_enabled, tour_enabled);
+
+		if (tour_enabled && tour_target_transform_valid[tour_target_index])
+		{
+			if (!input_handler.IsMouseCapturedByUI() &&
+			    (input_handler.GetMouseState(GLFW_MOUSE_BUTTON_LEFT) & PRESSED))
+			{
+				tour_yaw -= tour_mouse_delta.x * camera.mMouseSensitivity.x;
+				tour_pitch += tour_mouse_delta.y * camera.mMouseSensitivity.y;
+
+				auto const pitch_limit = glm::half_pi<float>() - glm::radians(1.0f);
+				tour_pitch = std::max(-pitch_limit, std::min(pitch_limit, tour_pitch));
+			}
+
+			if (!input_handler.IsMouseCapturedByUI() && io.MouseWheel != 0.0f)
+			{
+				auto const speed_modifier =
+					(input_handler.GetKeycodeState(GLFW_KEY_LEFT_CONTROL) & PRESSED) ? 0.25f :
+					(input_handler.GetKeycodeState(GLFW_KEY_LEFT_SHIFT) & PRESSED) ? 4.0f : 1.0f;
+				auto& distance = tour_camera_distances[tour_target_index];
+				distance *= std::pow(0.85f, io.MouseWheel * speed_modifier);
+				distance = std::max(tour_min_camera_distances[tour_target_index],
+				                    std::min(100.0f, distance));
+			}
+
+			auto const& target_transform = tour_target_transforms[tour_target_index];
+			auto const target_position = glm::vec3(target_transform[3]);
+			auto const distance = tour_camera_distances[tour_target_index];
+			auto const cos_pitch = std::cos(tour_pitch);
+			auto const camera_offset = distance * glm::vec3(
+				cos_pitch * std::sin(tour_yaw),
+				std::sin(tour_pitch),
+				cos_pitch * std::cos(tour_yaw));
+			auto const camera_position = target_position + camera_offset;
+
+			camera.mWorld.SetTranslate(camera_position);
+			camera.mWorld.LookAt(target_position);
+		}
 
 		if (input_handler.GetKeycodeState(GLFW_KEY_F3) & JUST_RELEASED)
 			show_logs = !show_logs;
@@ -241,16 +422,54 @@ int main()
 		//
 		// Traverse the scene graph and render all nodes
 		//
+		auto const view_projection = camera.GetWorldToClipMatrix();
 		struct CelestialBodyRef
 		{
 			CelestialBody* body;
 			glm::mat4 parent_transform;
 		};
-		// TODO: Replace this explicit rendering of the Earth and Moon
-		// with a traversal of the scene graph and rendering of all its
-		// nodes.
-		earth.render(animation_delta_time_us, camera.GetWorldToClipMatrix(), glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)), show_basis);
-		//moon.render(animation_delta_time_us, camera.GetWorldToClipMatrix(), glm::mat4(1.0f), show_basis);
+		std::stack<CelestialBodyRef> bodies_to_render;
+		bodies_to_render.push({ &sun, glm::mat4(1.0f) });
+
+		while (!bodies_to_render.empty())
+		{
+			auto const current = bodies_to_render.top();
+			bodies_to_render.pop();
+			int current_target_index = -1;
+			for (int target_index = 0; target_index < tour_target_count; ++target_index)
+			{
+				if (tour_targets[target_index] == current.body)
+				{
+					current_target_index = target_index;
+					break;
+				}
+			}
+
+			if (show_orbits && current_target_index >= 0 && target_orbits[current_target_index] != nullptr)
+			{
+				auto const& orbit = *target_orbits[current_target_index];
+				auto const orbit_tilt = glm::rotate(glm::mat4(1.0f), orbit.inclination,
+				                                    glm::vec3(0.0f, 0.0f, 1.0f));
+				auto const orbit_scale = glm::scale(glm::mat4(1.0f), glm::vec3(orbit.radius));
+				orbit_node.render(view_projection,
+				                  current.parent_transform * orbit_tilt * orbit_scale);
+			}
+
+			auto const children_transform = current.body->render(
+				animation_delta_time_us,
+				view_projection,
+				current.parent_transform,
+				show_basis);
+
+			if (current_target_index >= 0)
+			{
+				tour_target_transforms[current_target_index] = children_transform;
+				tour_target_transform_valid[current_target_index] = true;
+			}
+
+			for (auto* child : current.body->get_children())
+				bodies_to_render.push({ child, children_transform });
+		}
 
 
 		//
@@ -263,6 +482,13 @@ int main()
 			ImGui::SliderFloat("Time scale", &time_scale, 1e-1f, 10.0f);
 			ImGui::Separator();
 			ImGui::Checkbox("Show basis", &show_basis);
+			ImGui::Checkbox("Show orbits", &show_orbits);
+			ImGui::Separator();
+			ImGui::Checkbox("Interplanetary tour", &tour_enabled);
+			ImGui::Combo("Tour target", &tour_target_index,
+			             tour_target_names, tour_target_count);
+			if (tour_enabled)
+				ImGui::TextUnformatted("LMB drag: orbit | Wheel: zoom | Shift: faster");
 		}
 		ImGui::End();
 
@@ -290,8 +516,10 @@ int main()
 	glDeleteTextures(1, &moon_texture);
 	glDeleteTextures(1, &earth_texture);
 	glDeleteTextures(1, &venus_texture);
-	glDeleteTextures(1, &mars_texture);
+	glDeleteTextures(1, &mercury_texture);
 	glDeleteTextures(1, &sun_texture);
+	glDeleteBuffers(1, &orbit_circle_shape.bo);
+	glDeleteVertexArrays(1, &orbit_circle_shape.vao);
 
 	bonobo::deinit();
 

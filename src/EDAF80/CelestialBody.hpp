@@ -10,6 +10,7 @@ struct SpinConfiguration
 {
 	float axial_tilt{0.0f}; //!< Angle in radians between the body's rotational and orbital axis.
 	float speed{0.0f};      //!< Rotation speed in radians per second.
+	bool follows_orbit{false}; //!< Whether the body's orientation rotates along with its orbit.
 };
 
 struct OrbitConfiguration
@@ -93,6 +94,7 @@ private:
 			float axial_tilt{0.0f};     //!< Angle in radians between the its rotational and orbital axis.
 			float speed{0.0f};          //!< Rotation speed in radians per second.
 			float rotation_angle{0.0f}; //!< How much has it rotated around its rotational axis; in radians.
+			bool follows_orbit{false};  //!< Whether the body's orientation rotates along with its orbit.
 		} spin;
 	} _body;
 
