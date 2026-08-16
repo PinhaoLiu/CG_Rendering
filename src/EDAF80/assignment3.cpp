@@ -83,14 +83,43 @@ edaf80::Assignment3::run()
 	if (texcoord_shader == 0u)
 		LogError("Failed to load texcoord shader");
 
-	auto light_position = glm::vec3(-2.0f, 4.0f, 2.0f);
-	auto const set_uniforms = [&light_position](GLuint program){
-		glUniform3fv(glGetUniformLocation(program, "light_position"), 1, glm::value_ptr(light_position));
-	};
+	GLuint phong_shader = 0u;
+	program_manager.CreateAndRegisterProgram("Phong",
+	                                         { { ShaderType::vertex, "EDAF80/phong.vert" },
+	                                           { ShaderType::fragment, "EDAF80/phong.frag" } },
+	                                         phong_shader);
+	if (phong_shader == 0u)
+		LogError("Failed to load Phong shader");
 
+	GLuint flat_shader = 0u;
+	program_manager.CreateAndRegisterProgram("Flat",
+	                                         { { ShaderType::vertex, "EDAF80/flat.vert" },
+	                                           { ShaderType::geometry, "EDAF80/flat.geom" },
+	                                           { ShaderType::fragment, "EDAF80/flat.frag" } },
+	                                         flat_shader);
+	if (flat_shader == 0u)
+		LogError("Failed to load flat-shading shader");
+
+	GLuint gouraud_shader = 0u;
+	program_manager.CreateAndRegisterProgram("Gouraud",
+	                                         { { ShaderType::vertex, "EDAF80/gouraud.vert" },
+	                                           { ShaderType::fragment, "EDAF80/gouraud.frag" } },
+	                                         gouraud_shader);
+	if (gouraud_shader == 0u)
+		LogError("Failed to load Gouraud-shading shader");
+
+	GLuint skybox_shader = 0u;
+	program_manager.CreateAndRegisterProgram("Skybox",
+	                                         { { ShaderType::vertex, "EDAF80/skybox.vert" },
+	                                           { ShaderType::fragment, "EDAF80/skybox.frag" } },
+	                                         skybox_shader);
+	if (skybox_shader == 0u)
+		LogError("Failed to load skybox shader");
+
+	auto light_position = glm::vec3(-2.0f, 4.0f, 2.0f);
 	bool use_normal_mapping = false;
 	auto camera_position = mCamera.mWorld.GetTranslation();
-	auto const phong_set_uniforms = [&use_normal_mapping,&light_position,&camera_position](GLuint program){
+	auto const lighting_set_uniforms = [&use_normal_mapping,&light_position,&camera_position](GLuint program){
 		glUniform1i(glGetUniformLocation(program, "use_normal_mapping"), use_normal_mapping ? 1 : 0);
 		glUniform3fv(glGetUniformLocation(program, "light_position"), 1, glm::value_ptr(light_position));
 		glUniform3fv(glGetUniformLocation(program, "camera_position"), 1, glm::value_ptr(camera_position));
@@ -100,6 +129,18 @@ edaf80::Assignment3::run()
 	//
 	// Set up the two spheres used.
 	//
+	auto const cubemap_texture = bonobo::loadTextureCubeMap(
+		config::resources_path("cubemaps/NissiBeach2/posx.jpg"),
+		config::resources_path("cubemaps/NissiBeach2/negx.jpg"),
+		config::resources_path("cubemaps/NissiBeach2/posy.jpg"),
+		config::resources_path("cubemaps/NissiBeach2/negy.jpg"),
+		config::resources_path("cubemaps/NissiBeach2/posz.jpg"),
+		config::resources_path("cubemaps/NissiBeach2/negz.jpg"));
+	if (cubemap_texture == 0u) {
+		LogError("Failed to load the NissiBeach2 cubemap");
+		return;
+	}
+
 	auto skybox_shape = parametric_shapes::createSphere(20.0f, 100u, 100u);
 	if (skybox_shape.vao == 0u) {
 		LogError("Failed to retrieve the mesh for the skybox");
@@ -108,7 +149,8 @@ edaf80::Assignment3::run()
 
 	Node skybox;
 	skybox.set_geometry(skybox_shape);
-	skybox.set_program(&fallback_shader, set_uniforms);
+	skybox.add_texture("cubemap_texture", cubemap_texture, GL_TEXTURE_CUBE_MAP);
+	skybox.set_program(&skybox_shader);
 
 	auto demo_shape = parametric_shapes::createSphere(1.5f, 40u, 40u);
 	if (demo_shape.vao == 0u) {
@@ -122,10 +164,24 @@ edaf80::Assignment3::run()
 	demo_material.specular = glm::vec3(1.0f, 1.0f, 1.0f);
 	demo_material.shininess = 10.0f;
 
+	auto const diffuse_texture = bonobo::loadTexture2D(
+		config::resources_path("textures/leather_red_02_coll1_2k.jpg"));
+	auto const specular_texture = bonobo::loadTexture2D(
+		config::resources_path("textures/leather_red_02_rough_2k.jpg"));
+	auto const normals_texture = bonobo::loadTexture2D(
+		config::resources_path("textures/leather_red_02_nor_2k.jpg"));
+	if (diffuse_texture == 0u || specular_texture == 0u || normals_texture == 0u) {
+		LogError("Failed to load one or more leather textures");
+		return;
+	}
+
 	Node demo_sphere;
 	demo_sphere.set_geometry(demo_shape);
 	demo_sphere.set_material_constants(demo_material);
-	demo_sphere.set_program(&fallback_shader, phong_set_uniforms);
+	demo_sphere.add_texture("diffuse_texture", diffuse_texture, GL_TEXTURE_2D);
+	demo_sphere.add_texture("specular_texture", specular_texture, GL_TEXTURE_2D);
+	demo_sphere.add_texture("normals_texture", normals_texture, GL_TEXTURE_2D);
+	demo_sphere.set_program(&phong_shader, lighting_set_uniforms);
 
 
 	glClearDepthf(1.0f);
@@ -136,7 +192,8 @@ edaf80::Assignment3::run()
 	auto lastTime = std::chrono::high_resolution_clock::now();
 
 	bool use_orbit_camera = false;
-	std::int32_t demo_sphere_program_index = 0;
+	// Phong is the fifth registered program (index 4).
+	std::int32_t demo_sphere_program_index = 4;
 	auto cull_mode = bonobo::cull_mode_t::disabled;
 	auto polygon_mode = bonobo::polygon_mode_t::fill;
 	bool show_logs = true;
@@ -163,6 +220,9 @@ edaf80::Assignment3::run()
 			mCamera.mWorld.LookAt(glm::vec3(0.0f));
 		}
 		camera_position = mCamera.mWorld.GetTranslation();
+		// Keep the environment sphere centred on the camera. Its cubemap
+		// lookup ignores this translation in skybox.vert.
+		skybox.get_transform().SetTranslate(camera_position);
 
 		if (inputHandler.GetKeycodeState(GLFW_KEY_R) & JUST_PRESSED) {
 			shader_reload_failed = !program_manager.ReloadAllPrograms();
@@ -199,8 +259,16 @@ edaf80::Assignment3::run()
 		bonobo::changePolygonMode(polygon_mode);
 
 
-		skybox.render(mCamera.GetWorldToClipMatrix());
-		demo_sphere.render(mCamera.GetWorldToClipMatrix());
+		auto const world_to_clip = mCamera.GetWorldToClipMatrix();
+		demo_sphere.render(world_to_clip);
+
+		// The skybox is a background: draw it at the far depth after all
+		// opaque geometry, without allowing it to modify the depth buffer.
+		glDepthFunc(GL_LEQUAL);
+		glDepthMask(GL_FALSE);
+		skybox.render(world_to_clip);
+		glDepthMask(GL_TRUE);
+		glDepthFunc(GL_LESS);
 
 
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -214,10 +282,10 @@ edaf80::Assignment3::run()
 			bonobo::uiSelectPolygonMode("Polygon mode", polygon_mode);
 			auto demo_sphere_selection_result = program_manager.SelectProgram("Demo sphere", demo_sphere_program_index);
 			if (demo_sphere_selection_result.was_selection_changed) {
-				demo_sphere.set_program(demo_sphere_selection_result.program, phong_set_uniforms);
+				demo_sphere.set_program(demo_sphere_selection_result.program, lighting_set_uniforms);
 			}
 			ImGui::Separator();
-			ImGui::Checkbox("Use normal mapping", &use_normal_mapping);
+			ImGui::Checkbox("Use normal mapping (Phong only)", &use_normal_mapping);
 			ImGui::ColorEdit3("Ambient", glm::value_ptr(demo_material.ambient));
 			ImGui::ColorEdit3("Diffuse", glm::value_ptr(demo_material.diffuse));
 			ImGui::ColorEdit3("Specular", glm::value_ptr(demo_material.specular));
