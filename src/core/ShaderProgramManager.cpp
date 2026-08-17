@@ -22,7 +22,7 @@ ShaderProgramManager::~ShaderProgramManager()
 
 void ShaderProgramManager::CreateAndRegisterProgram(char const* const program_name, ProgramData const& program_data, GLuint& program)
 {
-	if (!GLAD_GL_ARB_compute_shader) {
+	if (!GLAD_GL_VERSION_4_3 && !GLAD_GL_ARB_compute_shader) {
 		for (auto const& i : program_data) {
 			if (i.first == ShaderType::compute) {
 				LogError("Compute shaders aren't exposed on your computer (needed for shader '%s'.", i.second.c_str());
@@ -39,7 +39,7 @@ void ShaderProgramManager::CreateAndRegisterProgram(char const* const program_na
 
 void ShaderProgramManager::CreateAndRegisterComputeProgram(char const* const program_name, std::string const& filename, GLuint& program)
 {
-	if (!GLAD_GL_ARB_compute_shader) {
+	if (!GLAD_GL_VERSION_4_3 && !GLAD_GL_ARB_compute_shader) {
 		LogError("Compute shaders aren't exposed on your computer (needed for shader '%s'.", filename.c_str());
 		return;
 	}

@@ -462,8 +462,10 @@ edan35::Assignment2::run()
 
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[toU(FBO::GBuffer)]);
 			glViewport(0, 0, framebuffer_width, framebuffer_height);
-			glClear(GL_DEPTH_BUFFER_BIT);
-			// XXX: Is any other clearing needed?
+			// The colour attachments must be reset as well as the depth buffer;
+			// otherwise pixels not covered by geometry retain data from earlier
+			// frames and show up as artefacts in the deferred pass.
+			glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
 			glUseProgram(fill_gbuffer_shader);
 			glUniform1i(fill_gbuffer_shader_locations.diffuse_texture, 0);
@@ -529,11 +531,14 @@ edan35::Assignment2::run()
 			//
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[toU(FBO::LightAccumulation)]);
 			glViewport(0, 0, framebuffer_width, framebuffer_height);
-			// XXX: Is any clearing needed?
+			// Contributions from the individual lights are additively blended below,
+			// so start every frame with an empty accumulation buffer.
+			glClear(GL_COLOR_BUFFER_BIT);
 			for (size_t i = 0; i < static_cast<size_t>(lights_nb); ++i) {
 				auto const& lightTransform = lightTransforms[i];
 				auto const light_view_matrix = lightOffsetTransform.GetMatrixInverse() * lightTransform.GetMatrixInverse();
-				auto const light_world_matrix = glm::inverse(light_view_matrix) * coneScaleTransform.GetMatrix();
+				auto const light_to_world_matrix = glm::inverse(light_view_matrix);
+				auto const light_world_matrix = light_to_world_matrix * coneScaleTransform.GetMatrix();
 				auto const light_world_to_clip_matrix = lightProjection * light_view_matrix;
 
 				//
@@ -544,7 +549,9 @@ edan35::Assignment2::run()
 
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[toU(FBO::ShadowMap)]);
 				glViewport(0, 0, constant::shadowmap_res_x, constant::shadowmap_res_y);
-				// XXX: Is any clearing needed?
+				// One texture is reused for every light.  Clear it before rendering
+				// each light or depth values from previous lights/frames survive.
+				glClear(GL_DEPTH_BUFFER_BIT);
 
 				glUseProgram(fill_shadowmap_shader);
 				glUniform1i(fill_shadowmap_shader_locations.light_index, static_cast<int>(i));
@@ -604,7 +611,10 @@ edan35::Assignment2::run()
 				            1.0f / static_cast<float>(framebuffer_width),
 				            1.0f / static_cast<float>(framebuffer_height));
 				glUniform3fv(accumulate_light_shader_locations.light_color, 1, glm::value_ptr(lightColors[i]));
-				glUniform3fv(accumulate_light_shader_locations.light_position, 1, glm::value_ptr(lightTransform.GetTranslation()));
+				// The spotlight is translated away from the rotation pivot by
+				// lightOffsetTransform; use its actual world-space position.
+				auto const light_position = glm::vec3(light_to_world_matrix[3]);
+				glUniform3fv(accumulate_light_shader_locations.light_position, 1, glm::value_ptr(light_position));
 				glUniform3fv(accumulate_light_shader_locations.light_direction, 1, glm::value_ptr(lightTransform.GetFront()));
 				glUniform1f(accumulate_light_shader_locations.light_intensity, constant::light_intensity);
 				glUniform1f(accumulate_light_shader_locations.light_angle_falloff, constant::light_angle_falloff);
@@ -960,6 +970,8 @@ FBOs createFramebufferObjects(Textures const& textures)
 
 	glBindFramebuffer(GL_FRAMEBUFFER, fbos[toU(FBO::ShadowMap)]);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, textures[toU(Texture::ShadowMap)], 0);
+	glDrawBuffer(GL_NONE);
+	glReadBuffer(GL_NONE);
 	validate_fbo("Shadow map generation");
 	utils::opengl::debug::nameObject(GL_FRAMEBUFFER, fbos[toU(FBO::ShadowMap)], "Shadow map generation");
 
