@@ -1,0 +1,39 @@
+#version 430
+
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly buffer PositionBuffer { vec4 positions[]; };
+layout(std430, binding = 5) buffer CellCountBuffer { uint cellCounts[]; };
+layout(std430, binding = 10) buffer GridErrorBuffer { uint gridErrors[4]; };
+
+uniform uint uParticleCount;
+uniform uvec3 uGridDimensions;
+uniform vec3 uGridMinimum;
+uniform float uGridCellSize;
+
+uint flatten(uvec3 cell)
+{
+	return cell.x + uGridDimensions.x * (cell.y + uGridDimensions.y * cell.z);
+}
+
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= uParticleCount)
+		return;
+	vec3 relative = (positions[i].xyz - uGridMinimum) / uGridCellSize;
+	bvec3 invalid_number = bvec3(isnan(relative.x) || isinf(relative.x),
+	                             isnan(relative.y) || isinf(relative.y),
+	                             isnan(relative.z) || isinf(relative.z));
+	if (any(invalid_number)) {
+		atomicAdd(gridErrors[0], 1u);
+		return;
+	}
+	bool outside = any(lessThan(relative, vec3(0.0))) ||
+	               any(greaterThanEqual(relative, vec3(uGridDimensions)));
+	if (outside)
+		atomicAdd(gridErrors[0], 1u);
+	ivec3 integer_cell = ivec3(floor(relative));
+	integer_cell = clamp(integer_cell, ivec3(0), ivec3(uGridDimensions) - ivec3(1));
+	atomicAdd(cellCounts[flatten(uvec3(integer_cell))], 1u);
+}

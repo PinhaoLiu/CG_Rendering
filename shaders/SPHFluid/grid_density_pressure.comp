@@ -1,0 +1,56 @@
+#version 430
+
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly buffer PositionBuffer { vec4 positions[]; };
+layout(std430, binding = 3) writeonly buffer DensityBuffer { float densities[]; };
+layout(std430, binding = 4) writeonly buffer PressureBuffer { float pressures[]; };
+layout(std430, binding = 5) readonly buffer CellCountBuffer { uint cellCounts[]; };
+layout(std430, binding = 6) readonly buffer CellOffsetBuffer { uint cellOffsets[]; };
+layout(std430, binding = 7) readonly buffer ParticleIndexBuffer { uint particleIndices[]; };
+layout(std430, binding = 10) buffer GridErrorBuffer { uint gridErrors[4]; };
+
+uniform uint uParticleCount;
+uniform uvec3 uGridDimensions;
+uniform vec3 uGridMinimum;
+uniform float uGridCellSize;
+uniform float uSmoothingRadius;
+uniform float uParticleMass;
+uniform float uRestDensity;
+uniform float uGasStiffness;
+
+const float PI = 3.14159265358979323846;
+uint flatten(uvec3 cell) { return cell.x + uGridDimensions.x * (cell.y + uGridDimensions.y * cell.z); }
+
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= uParticleCount)
+		return;
+	float h2 = uSmoothingRadius * uSmoothingRadius;
+	float h3 = h2 * uSmoothingRadius;
+	float coefficient = 315.0 / (64.0 * PI * h3 * h3 * h3);
+	vec3 position_i = positions[i].xyz;
+	ivec3 center = clamp(ivec3(floor((position_i - uGridMinimum) / uGridCellSize)),
+	                      ivec3(0), ivec3(uGridDimensions) - ivec3(1));
+	float density = 0.0;
+	for (int z = max(0, center.z - 1); z <= min(int(uGridDimensions.z) - 1, center.z + 1); ++z)
+	for (int y = max(0, center.y - 1); y <= min(int(uGridDimensions.y) - 1, center.y + 1); ++y)
+	for (int x = max(0, center.x - 1); x <= min(int(uGridDimensions.x) - 1, center.x + 1); ++x) {
+		uint cell = flatten(uvec3(x, y, z));
+		uint end = cellOffsets[cell] + cellCounts[cell];
+		for (uint cursor = cellOffsets[cell]; cursor < end; ++cursor) {
+			uint j = particleIndices[cursor];
+			if (j >= uParticleCount) { atomicAdd(gridErrors[2], 1u); continue; }
+			vec3 displacement = position_i - positions[j].xyz;
+			float squared_distance = dot(displacement, displacement);
+			if (squared_distance < h2) {
+				float difference = h2 - squared_distance;
+				density += uParticleMass * coefficient * difference * difference * difference;
+			}
+		}
+	}
+	density = max(1.0e-3 * uRestDensity, density);
+	densities[i] = density;
+	pressures[i] = uGasStiffness * max(density - uRestDensity, 0.0);
+}

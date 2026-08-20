@@ -1,0 +1,68 @@
+#version 430
+
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly buffer PositionBuffer { vec4 positions[]; };
+layout(std430, binding = 1) readonly buffer VelocityBuffer { vec4 velocities[]; };
+layout(std430, binding = 2) writeonly buffer AccelerationBuffer { vec4 accelerations[]; };
+layout(std430, binding = 3) readonly buffer DensityBuffer { float densities[]; };
+layout(std430, binding = 4) readonly buffer PressureBuffer { float pressures[]; };
+layout(std430, binding = 5) readonly buffer CellCountBuffer { uint cellCounts[]; };
+layout(std430, binding = 6) readonly buffer CellOffsetBuffer { uint cellOffsets[]; };
+layout(std430, binding = 7) readonly buffer ParticleIndexBuffer { uint particleIndices[]; };
+layout(std430, binding = 10) buffer GridErrorBuffer { uint gridErrors[4]; };
+
+uniform uint uParticleCount;
+uniform uvec3 uGridDimensions;
+uniform vec3 uGridMinimum;
+uniform float uGridCellSize;
+uniform float uSmoothingRadius;
+uniform float uParticleMass;
+uniform float uViscosity;
+uniform vec3 uGravity;
+
+const float PI = 3.14159265358979323846;
+uint flatten(uvec3 cell) { return cell.x + uGridDimensions.x * (cell.y + uGridDimensions.y * cell.z); }
+
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= uParticleCount)
+		return;
+	float h2 = uSmoothingRadius * uSmoothingRadius;
+	float h3 = h2 * uSmoothingRadius;
+	float h6 = h3 * h3;
+	float spiky = -45.0 / (PI * h6);
+	float viscosity_laplacian = 45.0 / (PI * h6);
+	vec3 position_i = positions[i].xyz;
+	vec3 velocity_i = velocities[i].xyz;
+	float density_i = densities[i];
+	float pressure_i = pressures[i];
+	ivec3 center = clamp(ivec3(floor((position_i - uGridMinimum) / uGridCellSize)),
+	                      ivec3(0), ivec3(uGridDimensions) - ivec3(1));
+	vec3 acceleration = uGravity;
+	for (int z = max(0, center.z - 1); z <= min(int(uGridDimensions.z) - 1, center.z + 1); ++z)
+	for (int y = max(0, center.y - 1); y <= min(int(uGridDimensions.y) - 1, center.y + 1); ++y)
+	for (int x = max(0, center.x - 1); x <= min(int(uGridDimensions.x) - 1, center.x + 1); ++x) {
+		uint cell = flatten(uvec3(x, y, z));
+		uint end = cellOffsets[cell] + cellCounts[cell];
+		for (uint cursor = cellOffsets[cell]; cursor < end; ++cursor) {
+			uint j = particleIndices[cursor];
+			if (j >= uParticleCount) { atomicAdd(gridErrors[2], 1u); continue; }
+			if (i == j) continue;
+			vec3 displacement = position_i - positions[j].xyz;
+			float squared_distance = dot(displacement, displacement);
+			if (!(squared_distance < h2) || squared_distance <= 1.0e-12) continue;
+			float distance = sqrt(squared_distance);
+			float difference = uSmoothingRadius - distance;
+			vec3 gradient = spiky * difference * difference * (displacement / distance);
+			float pressure_scale = -uParticleMass * (pressure_i + pressures[j]) /
+			                       (2.0 * density_i * densities[j]);
+			acceleration += pressure_scale * gradient;
+			float viscosity_scale = uViscosity * uParticleMass * viscosity_laplacian *
+			                        difference / (density_i * densities[j]);
+			acceleration += viscosity_scale * (velocities[j].xyz - velocity_i);
+		}
+	}
+	accelerations[i] = vec4(acceleration, 0.0);
+}

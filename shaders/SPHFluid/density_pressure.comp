@@ -1,0 +1,54 @@
+#version 430
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) readonly buffer PositionBuffer
+{
+	vec4 positions[];
+};
+
+layout(std430, binding = 3) writeonly buffer DensityBuffer
+{
+	float densities[];
+};
+
+layout(std430, binding = 4) writeonly buffer PressureBuffer
+{
+	float pressures[];
+};
+
+uniform uint uParticleCount;
+uniform float uSmoothingRadius;
+uniform float uParticleMass;
+uniform float uRestDensity;
+uniform float uGasStiffness;
+
+const float PI = 3.14159265358979323846;
+
+void main()
+{
+	const uint i = gl_GlobalInvocationID.x;
+	if (i >= uParticleCount)
+		return;
+
+	const float h2 = uSmoothingRadius * uSmoothingRadius;
+	const float h3 = h2 * uSmoothingRadius;
+	const float h6 = h3 * h3;
+	const float h9 = h6 * h3;
+	const float poly6_coefficient = 315.0 / (64.0 * PI * h9);
+	const vec3 position_i = positions[i].xyz;
+	float density = 0.0;
+	for (uint j = 0u; j < uParticleCount; ++j) {
+		const vec3 displacement = position_i - positions[j].xyz;
+		const float squared_distance = dot(displacement, displacement);
+		if (squared_distance >= 0.0 && squared_distance < h2) {
+			const float difference = h2 - squared_distance;
+			density += uParticleMass * poly6_coefficient *
+			           difference * difference * difference;
+		}
+	}
+
+	density = max(1.0e-3 * uRestDensity, density);
+	densities[i] = density;
+	pressures[i] = uGasStiffness * max(density - uRestDensity, 0.0);
+}

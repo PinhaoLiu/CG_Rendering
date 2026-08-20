@@ -2,7 +2,10 @@
 
 # Workaround for the lab computers
 if (WIN32)
-	set (LUGGCGL_TMP_DIR ${CMAKE_SOURCE_DIR}/../Temp)
+	# Keep compiler and dependency temporary files inside the active build tree.
+	# A source-adjacent ../Temp directory is shared by configurations and can be
+	# unwritable in isolated build environments.
+	set (LUGGCGL_TMP_DIR ${CMAKE_BINARY_DIR}/Temp)
 	if (NOT EXISTS ${LUGGCGL_TMP_DIR})
 		file (MAKE_DIRECTORY ${LUGGCGL_TMP_DIR})
 	endif ()
@@ -151,6 +154,7 @@ add_subdirectory ("${CMAKE_SOURCE_DIR}/src/external")
 add_subdirectory ("${CMAKE_SOURCE_DIR}/src/core")
 add_subdirectory ("${CMAKE_SOURCE_DIR}/src/EDAF80")
 add_subdirectory ("${CMAKE_SOURCE_DIR}/src/EDAN35")
+add_subdirectory ("${CMAKE_SOURCE_DIR}/src/SPHFluid")
 
 install (DIRECTORY ${CMAKE_SOURCE_DIR}/shaders DESTINATION bin)
 install (DIRECTORY ${CMAKE_SOURCE_DIR}/res DESTINATION bin)

@@ -1,0 +1,67 @@
+#version 430
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer PositionBuffer
+{
+	vec4 positions[];
+};
+
+layout(std430, binding = 1) buffer VelocityBuffer
+{
+	vec4 velocities[];
+};
+
+layout(std430, binding = 2) readonly buffer AccelerationBuffer
+{
+	vec4 accelerations[];
+};
+
+uniform uint uParticleCount;
+uniform float uFixedDeltaSeconds;
+uniform float uParticleRadius;
+uniform vec3 uBoundaryCenter;
+uniform vec3 uBoundaryHalfExtent;
+uniform float uRestitution;
+uniform float uFriction;
+
+void main()
+{
+	const uint i = gl_GlobalInvocationID.x;
+	if (i >= uParticleCount)
+		return;
+
+	vec3 velocity = velocities[i].xyz +
+	                accelerations[i].xyz * uFixedDeltaSeconds;
+	vec3 position = positions[i].xyz + velocity * uFixedDeltaSeconds;
+	const vec3 minimum_position = uBoundaryCenter - uBoundaryHalfExtent +
+	                              vec3(uParticleRadius);
+	const vec3 maximum_position = uBoundaryCenter + uBoundaryHalfExtent -
+	                              vec3(uParticleRadius);
+
+	for (int axis = 0; axis < 3; ++axis) {
+		bool collided = false;
+		if (position[axis] < minimum_position[axis]) {
+			position[axis] = minimum_position[axis];
+			if (velocity[axis] < 0.0)
+				velocity[axis] *= -uRestitution;
+			collided = true;
+		} else if (position[axis] > maximum_position[axis]) {
+			position[axis] = maximum_position[axis];
+			if (velocity[axis] > 0.0)
+				velocity[axis] *= -uRestitution;
+			collided = true;
+		}
+
+		if (collided) {
+			const float tangential_scale = 1.0 - uFriction;
+			for (int tangent_axis = 0; tangent_axis < 3; ++tangent_axis) {
+				if (tangent_axis != axis)
+					velocity[tangent_axis] *= tangential_scale;
+			}
+		}
+	}
+
+	positions[i] = vec4(position, 1.0);
+	velocities[i] = vec4(velocity, 0.0);
+}

@@ -22,3 +22,11 @@ log.txt
 *.sdf
 *.suo
 *.vcxproj.user
+
+# SPH Fluid local stuff
+/SPHFluid.md
+/results/
+/src/SPHFluid/README.md
+/src/SPHFluid/docs/
+/src/SPHFluid/scripts/
+/src/SPHFluid/tests/

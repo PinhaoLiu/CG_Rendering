@@ -1,0 +1,27 @@
+#version 430
+
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 5) readonly buffer CellCountBuffer { uint cellCounts[]; };
+layout(std430, binding = 6) readonly buffer CellOffsetBuffer { uint cellOffsets[]; };
+layout(std430, binding = 10) buffer GridErrorBuffer { uint gridErrors[4]; };
+layout(std430, binding = 11) writeonly buffer CellCursorBuffer { uint cellCursors[]; };
+
+uniform uint uCellCount;
+uniform uint uParticleCount;
+
+void main()
+{
+	uint cell = gl_GlobalInvocationID.x;
+	if (cell >= uCellCount)
+		return;
+	uint offset = cellOffsets[cell];
+	uint end = offset + cellCounts[cell];
+	if (end < offset || end > uParticleCount)
+		atomicAdd(gridErrors[3], 1u);
+	if (cell + 1u < uCellCount && cellOffsets[cell + 1u] != end)
+		atomicAdd(gridErrors[3], 1u);
+	if (cell + 1u == uCellCount && end != uParticleCount)
+		atomicAdd(gridErrors[3], 1u);
+	cellCursors[cell] = offset;
+}
