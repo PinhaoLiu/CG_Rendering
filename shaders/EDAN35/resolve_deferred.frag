@@ -4,6 +4,8 @@ uniform sampler2D diffuse_texture;
 uniform sampler2D specular_texture;
 uniform sampler2D light_d_texture;
 uniform sampler2D light_s_texture;
+uniform sampler2D ao_texture;
+uniform bool ssao_enabled;
 
 layout (pixel_center_integer) in vec4 gl_FragCoord;
 
@@ -18,7 +20,8 @@ void main()
 
 	vec3 light_d  = texelFetch(light_d_texture,  pixel_coord, 0).rgb;
 	vec3 light_s  = texelFetch(light_s_texture,  pixel_coord, 0).rgb;
+	float ao = ssao_enabled ? texelFetch(ao_texture, pixel_coord, 0).r : 1.0;
 	const vec3 ambient = vec3(0.15);
 
-	frag_color =  vec4((ambient + light_d) * diffuse + light_s * specular, 1.0);
+	frag_color = vec4((ambient * ao + light_d) * diffuse + light_s * specular, 1.0);
 }

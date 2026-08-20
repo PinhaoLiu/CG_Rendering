@@ -50,6 +50,8 @@ namespace
 		GBufferWorldSpaceNormal,
 		LightDiffuseContribution,
 		LightSpecularContribution,
+		SSAORaw,
+		SSAOBlurred,
 		Result,
 		Count
 	};
@@ -67,6 +69,8 @@ namespace
 
 	enum class FBO : uint32_t {
 		GBuffer = 0u,
+		SSAO,
+		SSAOBlur,
 		ShadowMap,
 		LightAccumulation,
 		Resolve,
@@ -78,6 +82,8 @@ namespace
 
 	enum class ElapsedTimeQuery : uint32_t {
 		GbufferGeneration = 0u,
+		SSAOGeneration,
+		SSAOBlur,
 		ShadowMap0Generation,
 		Light0Accumulation = ShadowMap0Generation + static_cast<uint32_t>(constant::lights_nb),
 		Resolve = Light0Accumulation + static_cast<uint32_t>(constant::lights_nb),
@@ -269,6 +275,26 @@ edan35::Assignment2::run()
 	GBufferShaderLocations fill_gbuffer_shader_locations;
 	fillGBufferShaderLocations(fill_gbuffer_shader, fill_gbuffer_shader_locations);
 
+	GLuint ssao_shader = 0u;
+	program_manager.CreateAndRegisterProgram("SSAO",
+	                                         { { ShaderType::vertex, "EDAN35/resolve_deferred.vert" },
+	                                           { ShaderType::fragment, "EDAN35/ssao.frag" } },
+	                                         ssao_shader);
+	if (ssao_shader == 0u) {
+		LogError("Failed to load SSAO shader");
+		return;
+	}
+
+	GLuint ssao_blur_shader = 0u;
+	program_manager.CreateAndRegisterProgram("SSAO bilateral blur",
+	                                         { { ShaderType::vertex, "EDAN35/resolve_deferred.vert" },
+	                                           { ShaderType::fragment, "EDAN35/ssao_blur.frag" } },
+	                                         ssao_blur_shader);
+	if (ssao_blur_shader == 0u) {
+		LogError("Failed to load SSAO blur shader");
+		return;
+	}
+
 	GLuint fill_shadowmap_shader = 0u;
 	program_manager.CreateAndRegisterProgram("Fill shadow map",
 	                                         { { ShaderType::vertex, "EDAN35/fill_shadowmap.vert" },
@@ -379,6 +405,12 @@ edan35::Assignment2::run()
 	bool show_basis = false;
 	float basis_thickness_scale = 40.0f;
 	float basis_length_scale = 400.0f;
+	bool ssao_enabled = true;
+	int ssao_sample_count = 32;
+	float ssao_radius = 35.0f;
+	float ssao_bias = 1.0f;
+	float ssao_power = 1.5f;
+	float ssao_blur_depth_sigma = 10.0f;
 
 	while (!glfwWindowShouldClose(window)) {
 		auto const nowTime = std::chrono::high_resolution_clock::now();
@@ -398,6 +430,9 @@ edan35::Assignment2::run()
 		camera_view_proj_transforms.view_projection_inverse = mCamera.GetClipToWorldMatrix();
 
 		auto const view_projection = camera_view_proj_transforms.view_projection;
+		auto const projection = mCamera.GetViewToClipMatrix();
+		auto const projection_inverse = mCamera.GetClipToViewMatrix();
+		auto const world_to_view = mCamera.GetWorldToViewMatrix();
 
 		if (inputHandler.GetKeycodeState(GLFW_KEY_R) & JUST_PRESSED) {
 			shader_reload_failed = !program_manager.ReloadAllPrograms();
@@ -525,9 +560,82 @@ edan35::Assignment2::run()
 			utils::opengl::debug::endDebugGroup();
 
 
+			//
+			// Pass 2: Estimate screen-space ambient occlusion.
+			//
+			utils::opengl::debug::beginDebugGroup("SSAO");
+			glBeginQuery(GL_TIME_ELAPSED, elapsed_time_queries[toU(ElapsedTimeQuery::SSAOGeneration)]);
+
+			glDisable(GL_DEPTH_TEST);
+			glDisable(GL_CULL_FACE);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[toU(FBO::SSAO)]);
+			glViewport(0, 0, framebuffer_width, framebuffer_height);
+			glUseProgram(ssao_shader);
+
+			bind_texture_with_sampler(GL_TEXTURE_2D, 0, ssao_shader, "depth_texture",
+			                          textures[toU(Texture::DepthBuffer)], samplers[toU(Sampler::Nearest)]);
+			bind_texture_with_sampler(GL_TEXTURE_2D, 1, ssao_shader, "normal_texture",
+			                          textures[toU(Texture::GBufferWorldSpaceNormal)], samplers[toU(Sampler::Nearest)]);
+			glUniformMatrix4fv(glGetUniformLocation(ssao_shader, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+			glUniformMatrix4fv(glGetUniformLocation(ssao_shader, "projection_inverse"), 1, GL_FALSE, glm::value_ptr(projection_inverse));
+			glUniformMatrix4fv(glGetUniformLocation(ssao_shader, "world_to_view"), 1, GL_FALSE, glm::value_ptr(world_to_view));
+			glUniform2f(glGetUniformLocation(ssao_shader, "inverse_screen_resolution"),
+			            1.0f / static_cast<float>(framebuffer_width),
+			            1.0f / static_cast<float>(framebuffer_height));
+			glUniform1f(glGetUniformLocation(ssao_shader, "radius"), ssao_radius);
+			glUniform1f(glGetUniformLocation(ssao_shader, "bias"), ssao_bias);
+			glUniform1f(glGetUniformLocation(ssao_shader, "power"), ssao_power);
+			glUniform1i(glGetUniformLocation(ssao_shader, "sample_count"), ssao_sample_count);
+
+			bonobo::drawFullscreen();
+
+			glBindSampler(1u, 0u);
+			glBindSampler(0u, 0u);
+			glUseProgram(0u);
+
+			glEndQuery(GL_TIME_ELAPSED);
+			utils::opengl::debug::endDebugGroup();
+
 
 			//
-			// Pass 2: Generate shadowmaps and accumulate lights' contribution
+			// Pass 3: Edge-preserving bilateral blur of the raw SSAO result.
+			//
+			utils::opengl::debug::beginDebugGroup("SSAO bilateral blur");
+			glBeginQuery(GL_TIME_ELAPSED, elapsed_time_queries[toU(ElapsedTimeQuery::SSAOBlur)]);
+
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[toU(FBO::SSAOBlur)]);
+			glViewport(0, 0, framebuffer_width, framebuffer_height);
+			glUseProgram(ssao_blur_shader);
+
+			bind_texture_with_sampler(GL_TEXTURE_2D, 0, ssao_blur_shader, "ao_texture",
+			                          textures[toU(Texture::SSAORaw)], samplers[toU(Sampler::Nearest)]);
+			bind_texture_with_sampler(GL_TEXTURE_2D, 1, ssao_blur_shader, "depth_texture",
+			                          textures[toU(Texture::DepthBuffer)], samplers[toU(Sampler::Nearest)]);
+			bind_texture_with_sampler(GL_TEXTURE_2D, 2, ssao_blur_shader, "normal_texture",
+			                          textures[toU(Texture::GBufferWorldSpaceNormal)], samplers[toU(Sampler::Nearest)]);
+			glUniformMatrix4fv(glGetUniformLocation(ssao_blur_shader, "projection_inverse"),
+			                   1, GL_FALSE, glm::value_ptr(projection_inverse));
+			glUniform2f(glGetUniformLocation(ssao_blur_shader, "inverse_screen_resolution"),
+			            1.0f / static_cast<float>(framebuffer_width),
+			            1.0f / static_cast<float>(framebuffer_height));
+			glUniform1f(glGetUniformLocation(ssao_blur_shader, "depth_sigma"), ssao_blur_depth_sigma);
+
+			bonobo::drawFullscreen();
+
+			glBindSampler(2u, 0u);
+			glBindSampler(1u, 0u);
+			glBindSampler(0u, 0u);
+			glUseProgram(0u);
+			glEnable(GL_CULL_FACE);
+			glEnable(GL_DEPTH_TEST);
+
+			glEndQuery(GL_TIME_ELAPSED);
+			utils::opengl::debug::endDebugGroup();
+
+
+
+			//
+			// Pass 4: Generate shadowmaps and accumulate lights' contribution
 			//
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[toU(FBO::LightAccumulation)]);
 			glViewport(0, 0, framebuffer_width, framebuffer_height);
@@ -542,7 +650,7 @@ edan35::Assignment2::run()
 				auto const light_world_to_clip_matrix = lightProjection * light_view_matrix;
 
 				//
-				// Pass 2.1: Generate shadow map for light i
+				// Pass 4.1: Generate shadow map for light i
 				//
 				utils::opengl::debug::beginDebugGroup("Create shadow map " + std::to_string(i));
 				glBeginQuery(GL_TIME_ELAPSED, elapsed_time_queries[toU(ElapsedTimeQuery::ShadowMap0Generation) + i]);
@@ -595,7 +703,7 @@ edan35::Assignment2::run()
 				glBlendEquationSeparate(GL_FUNC_ADD, GL_MIN);
 				glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ONE);
 				//
-				// Pass 2.2: Accumulate light i contribution
+				// Pass 4.2: Accumulate light i contribution
 				utils::opengl::debug::beginDebugGroup("Accumulate light " + std::to_string(i));
 				glBeginQuery(GL_TIME_ELAPSED, elapsed_time_queries[toU(ElapsedTimeQuery::Light0Accumulation) + i]);
 
@@ -654,7 +762,7 @@ edan35::Assignment2::run()
 
 
 			//
-			// Pass 3: Compute final image using both the g-buffer and  the light accumulation buffer
+			// Pass 5: Resolve the G-buffer, light accumulation and ambient occlusion
 			//
 			utils::opengl::debug::beginDebugGroup("Resolve");
 			glBeginQuery(GL_TIME_ELAPSED, elapsed_time_queries[toU(ElapsedTimeQuery::Resolve)]);
@@ -668,13 +776,16 @@ edan35::Assignment2::run()
 			bind_texture_with_sampler(GL_TEXTURE_2D, 1, resolve_deferred_shader, "specular_texture", textures[toU(Texture::GBufferSpecular)], samplers[toU(Sampler::Nearest)]);
 			bind_texture_with_sampler(GL_TEXTURE_2D, 2, resolve_deferred_shader, "light_d_texture", textures[toU(Texture::LightDiffuseContribution)], samplers[toU(Sampler::Nearest)]);
 			bind_texture_with_sampler(GL_TEXTURE_2D, 3, resolve_deferred_shader, "light_s_texture", textures[toU(Texture::LightSpecularContribution)], samplers[toU(Sampler::Nearest)]);
+			bind_texture_with_sampler(GL_TEXTURE_2D, 4, resolve_deferred_shader, "ao_texture", textures[toU(Texture::SSAOBlurred)], samplers[toU(Sampler::Nearest)]);
+			glUniform1i(glGetUniformLocation(resolve_deferred_shader, "ssao_enabled"), ssao_enabled ? 1 : 0);
 
 			bonobo::drawFullscreen();
 
-			glBindSampler(3, 0u);
-			glBindSampler(2, 0u);
-			glBindSampler(1, 0u);
-			glBindSampler(0, 0u);
+			glBindSampler(4u, 0u);
+			glBindSampler(3u, 0u);
+			glBindSampler(2u, 0u);
+			glBindSampler(1u, 0u);
+			glBindSampler(0u, 0u);
 			glUseProgram(0u);
 
 			glEndQuery(GL_TIME_ELAPSED);
@@ -736,6 +847,7 @@ edan35::Assignment2::run()
 			bonobo::displayTexture({-0.95f,  0.55f}, {-0.55f,  0.95f}, textures[toU(Texture::ShadowMap)],                 samplers[toU(Sampler::Linear)], {0, 0, 0, -1}, glm::uvec2(framebuffer_width, framebuffer_height), true, lightProjectionNearPlane, lightProjectionFarPlane);
 			bonobo::displayTexture({-0.45f,  0.55f}, {-0.05f,  0.95f}, textures[toU(Texture::LightDiffuseContribution)],  samplers[toU(Sampler::Linear)], {0, 1, 2, -1}, glm::uvec2(framebuffer_width, framebuffer_height));
 			bonobo::displayTexture({ 0.05f,  0.55f}, { 0.45f,  0.95f}, textures[toU(Texture::LightSpecularContribution)], samplers[toU(Sampler::Linear)], {0, 1, 2, -1}, glm::uvec2(framebuffer_width, framebuffer_height));
+			bonobo::displayTexture({ 0.55f,  0.55f}, { 0.95f,  0.95f}, textures[toU(Texture::SSAOBlurred)],              samplers[toU(Sampler::Linear)], {0, 0, 0, -1}, glm::uvec2(framebuffer_width, framebuffer_height));
 		}
 
 		//
@@ -759,6 +871,16 @@ edan35::Assignment2::run()
 				ImGui::Text("Gbuffer gen.");
 				ImGui::TableNextColumn();
 				ImGui::Text("%.3f", pass_elapsed_times[toU(ElapsedTimeQuery::GbufferGeneration)] / 1000000.0f);
+
+				ImGui::TableNextColumn();
+				ImGui::Text("SSAO");
+				ImGui::TableNextColumn();
+				ImGui::Text("%.3f", pass_elapsed_times[toU(ElapsedTimeQuery::SSAOGeneration)] / 1000000.0f);
+
+				ImGui::TableNextColumn();
+				ImGui::Text("SSAO blur");
+				ImGui::TableNextColumn();
+				ImGui::Text("%.3f", pass_elapsed_times[toU(ElapsedTimeQuery::SSAOBlur)] / 1000000.0f);
 
 				for (std::size_t i = 0; i < lights_nb; ++i) {
 					ImGui::TableNextColumn();
@@ -809,6 +931,13 @@ edan35::Assignment2::run()
 			ImGui::Checkbox("Show textures", &show_textures);
 			ImGui::Checkbox("Show light cones wireframe", &show_cone_wireframe);
 			ImGui::Separator();
+			ImGui::Checkbox("Enable SSAO", &ssao_enabled);
+			ImGui::SliderInt("SSAO samples", &ssao_sample_count, 4, 32);
+			ImGui::SliderFloat("SSAO radius [cm]", &ssao_radius, 1.0f, 100.0f, "%.1f");
+			ImGui::SliderFloat("SSAO bias [cm]", &ssao_bias, 0.05f, 5.0f, "%.2f");
+			ImGui::SliderFloat("SSAO power", &ssao_power, 0.25f, 4.0f, "%.2f");
+			ImGui::SliderFloat("SSAO blur depth sigma [cm]", &ssao_blur_depth_sigma, 1.0f, 50.0f, "%.1f");
+			ImGui::Separator();
 			ImGui::Checkbox("Show basis", &show_basis);
 			ImGui::SliderFloat("Basis thickness scale", &basis_thickness_scale, 0.0f, 100.0f);
 			ImGui::SliderFloat("Basis length scale", &basis_length_scale, 0.0f, 100.0f);
@@ -849,6 +978,10 @@ edan35::Assignment2::run()
 
 	glDeleteProgram(resolve_deferred_shader);
 	resolve_deferred_shader = 0u;
+	glDeleteProgram(ssao_blur_shader);
+	ssao_blur_shader = 0u;
+	glDeleteProgram(ssao_shader);
+	ssao_shader = 0u;
 	glDeleteProgram(accumulate_lights_shader);
 	accumulate_lights_shader = 0u;
 	glDeleteProgram(fill_shadowmap_shader);
@@ -907,6 +1040,14 @@ Textures createTextures(GLsizei framebuffer_width, GLsizei framebuffer_height)
 	glBindTexture(GL_TEXTURE_2D, textures[toU(Texture::LightSpecularContribution)]);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, framebuffer_width, framebuffer_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	utils::opengl::debug::nameObject(GL_TEXTURE, textures[toU(Texture::LightSpecularContribution)], "Light specular contribution");
+
+	glBindTexture(GL_TEXTURE_2D, textures[toU(Texture::SSAORaw)]);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, framebuffer_width, framebuffer_height, 0, GL_RED, GL_FLOAT, nullptr);
+	utils::opengl::debug::nameObject(GL_TEXTURE, textures[toU(Texture::SSAORaw)], "SSAO raw");
+
+	glBindTexture(GL_TEXTURE_2D, textures[toU(Texture::SSAOBlurred)]);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, framebuffer_width, framebuffer_height, 0, GL_RED, GL_FLOAT, nullptr);
+	utils::opengl::debug::nameObject(GL_TEXTURE, textures[toU(Texture::SSAOBlurred)], "SSAO blurred");
 
 	glBindTexture(GL_TEXTURE_2D, textures[toU(Texture::Result)]);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, framebuffer_width, framebuffer_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -968,6 +1109,20 @@ FBOs createFramebufferObjects(Textures const& textures)
 	validate_fbo("GBuffer");
 	utils::opengl::debug::nameObject(GL_FRAMEBUFFER, fbos[toU(FBO::GBuffer)], "GBuffer");
 
+	glBindFramebuffer(GL_FRAMEBUFFER, fbos[toU(FBO::SSAO)]);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[toU(Texture::SSAORaw)], 0);
+	glReadBuffer(GL_NONE);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	validate_fbo("SSAO");
+	utils::opengl::debug::nameObject(GL_FRAMEBUFFER, fbos[toU(FBO::SSAO)], "SSAO");
+
+	glBindFramebuffer(GL_FRAMEBUFFER, fbos[toU(FBO::SSAOBlur)]);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[toU(Texture::SSAOBlurred)], 0);
+	glReadBuffer(GL_NONE);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	validate_fbo("SSAO blur");
+	utils::opengl::debug::nameObject(GL_FRAMEBUFFER, fbos[toU(FBO::SSAOBlur)], "SSAO bilateral blur");
+
 	glBindFramebuffer(GL_FRAMEBUFFER, fbos[toU(FBO::ShadowMap)]);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, textures[toU(Texture::ShadowMap)], 0);
 	glDrawBuffer(GL_NONE);
@@ -1025,6 +1180,12 @@ ElapsedTimeQueries createElapsedTimeQueries()
 
 		register_query(queries[toU(ElapsedTimeQuery::GbufferGeneration)]);
 		utils::opengl::debug::nameObject(GL_QUERY, queries[toU(ElapsedTimeQuery::GbufferGeneration)], "GBuffer generation");
+
+		register_query(queries[toU(ElapsedTimeQuery::SSAOGeneration)]);
+		utils::opengl::debug::nameObject(GL_QUERY, queries[toU(ElapsedTimeQuery::SSAOGeneration)], "SSAO generation");
+
+		register_query(queries[toU(ElapsedTimeQuery::SSAOBlur)]);
+		utils::opengl::debug::nameObject(GL_QUERY, queries[toU(ElapsedTimeQuery::SSAOBlur)], "SSAO bilateral blur");
 
 		for (size_t i = 0; i < constant::lights_nb; ++i)
 		{
