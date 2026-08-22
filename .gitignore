@@ -23,8 +23,11 @@ log.txt
 *.suo
 *.vcxproj.user
 
-# SPH Fluid local stuff
+# Local stuff
 /SPHFluid.md
+/bendaydots.md
+
+# SPH Fluid local stuff
 /results/
 /src/SPHFluid/README.md
 /src/SPHFluid/docs/
