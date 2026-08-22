@@ -1,2 +1,12 @@
 # Set the default behaviour to keep LF as line ending
+* text=auto eol=lf
+
+# Binary files
 *.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.ico binary
