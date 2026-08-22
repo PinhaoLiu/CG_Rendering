@@ -1,5 +1,9 @@
 # Real-Time SPH Fluid Simulation
 
+<img src="./assets/image-20260823011238310.png" alt="image-20260823011238310" style="zoom:50%;" />
+
+<img src="./assets/image-20260823011331220.png" alt="image-20260823011331220" style="zoom:50%;" />
+
 ## Project Goal
 
 This project implements an interactive WCSPH fluid simulation in C++17 and OpenGL. It includes CPU and GPU solvers, uniform-grid neighbour search, multithreaded CPU simulation, and screen-space fluid rendering.

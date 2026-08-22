@@ -1,5 +1,11 @@
 # Deferred Shading
 
+SSAO on<img src="./assets/image-20260823011729994.png" alt="image-20260823011729994" style="zoom:50%;" />
+
+SSAO off<img src="./assets/image-20260823011745373.png" alt="image-20260823011745373" style="zoom:50%;" />
+
+
+
 ## Project Goal
 
 This project implements a deferred-shading pipeline in OpenGL. Scene geometry is first written to a G-buffer and then evaluated in screen space. The renderer also includes dynamic spotlights, shadow mapping with 3×3 PCF, SSAO, and debug views for intermediate render targets.

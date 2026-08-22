@@ -1,5 +1,13 @@
 # Ben-Day Halftone Rendering
 
+<img src="./assets/image-20260823010832209.png" alt="image-20260823010832209" style="zoom: 50%;" />
+
+<img src="./assets/image-20260823010911042.png" alt="image-20260823010911042" style="zoom:50%;" />
+
+<img src="./assets/image-20260823011007558.png" alt="image-20260823011007558" style="zoom:50%;" />
+
+<img src="./assets/image-20260823011017577.png" alt="image-20260823011017577" style="zoom:50%;" />
+
 ## Project Goal
 
 This project implements real-time Ben-Day dot rendering as an OpenGL full-screen post-process. A textured Sponza scene is rendered into colour, depth, and world-space normal targets before the halftone pass is applied.

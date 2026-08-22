@@ -1,5 +1,7 @@
 # GPU Ray Tracing
 
+<img src="./assets/image-20260823011556278.png" alt="image-20260823011556278" style="zoom:50%;" />
+
 ## Project Goal
 
 This project implements an interactive Whitted-style ray tracer with an OpenGL compute shader. The CPU loads the scene and builds an AABB BVH, while the GPU traverses the BVH and evaluates hard shadows, reflection, refraction, and anti-aliasing.
